@@ -1,6 +1,8 @@
-import oAuthClient from './client'
+
+import { createHash } from 'crypto'
 import querystring from 'querystring'
 import jwtDecode from 'jwt-decode'
+import oAuthClient from './client'
 import logger from '../../../lib/logger'
 
 // @TODO Refactor monkey patching in _getOAuthAccessToken() and _get()
@@ -13,11 +15,23 @@ import logger from '../../../lib/logger'
 
 // @TODO Refactor to use jsonwebtoken instead of jwt-decode & remove dependancy
 
-export default async (req, provider, callback) => {
-  let { oauth_token, oauth_verifier, code } = req.query // eslint-disable-line camelcase
+export default async (req, provider, csrfToken, callback) => {
+  let { oauth_token, oauth_verifier, code, state } = req.query // eslint-disable-line camelcase
   const client = oAuthClient(provider)
 
   if (provider.version && provider.version.startsWith('2.')) {
+    // For OAuth 2.0 flows, check state returned and matches expected value
+    // (a hash of the NextAuth.js CSRF token).
+    //
+    // This check can be disabled for providers that do not support it by
+    // setting 'useState: false' as a provider option (defaults to true).
+    if (!Object.prototype.hasOwnProperty.call(provider, 'useState') || provider.useState === true) {
+      const expectedState = createHash('sha256').update(csrfToken).digest('hex')
+      if (state !== expectedState) {
+        return callback(new Error("Invalid state returned from oAuth provider"))
+      } 
+    }
+
     if (req.method === 'POST') {
       // Get the CODE from Body
       const body = JSON.parse(JSON.stringify(req.body))
